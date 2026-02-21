@@ -1,32 +1,18 @@
 module WebSocketManager exposing
-    ( -- Quick start: configure, wire, use
-      Config
-    , Params
-    , init
-    , WebSocket
-    , withPorts
-    , CommandPort
-    , EventPort
-    , WsEvent
-    , onEvent
-      -- Events (pattern match on these)
-    , Event(..)
-    , CloseInfo
-    , ReconnectInfo
-      -- Close codes
-    , CloseCode(..)
-    , closeCodeToInt
-    , closeCodeFromInt
-      -- Reconnection
-    , ReconnectConfig
-    , defaultReconnect
-      -- Connection state (optional helper)
-    , ConnectionState(..)
-    , connectionStateFromEvent
-      -- Advanced: typed commands
-    , Command(..)
-    , encode
-    , eventDecoder
+    ( Config, Params, init
+    , WebSocket, withPorts, CommandPort, EventPort
+    , WsEvent, onEvent
+    , Event(..), CloseInfo, ReconnectInfo
+    , CloseCode(..), closeCodeToInt, closeCodeFromInt
+    , ReconnectConfig, defaultReconnect
+    , ConnectionState(..), connectionStateFromEvent
+    , Command(..), encode, eventDecoder
+    -- Quick start: configure, wire, use
+    -- Close codes
+    -- Reconnection
+    -- Advanced: typed commands
+    -- Connection state (optional helper)
+    -- Events (pattern match on these)
     )
 
 {-| Type-safe WebSocket management with reconnection support via structured ports.
