@@ -1,0 +1,17 @@
+{
+    "name": "elm-websocket-manager",
+    "version": "1.0.0",
+    "description": "JS companion module for mpizenberg/elm-websocket-manager Elm package",
+    "main": "js/websocket-manager.js",
+    "module": "js/websocket-manager.js",
+    "type": "module",
+    "files": [
+        "js/websocket-manager.js"
+    ],
+    "keywords": [
+        "elm",
+        "websocket",
+        "ports"
+    ],
+    "license": "BSD-3-Clause"
+}
