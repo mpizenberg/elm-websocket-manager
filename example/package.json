@@ -1,0 +1,12 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "elm make src/Main.elm --output=main.js",
+    "server": "node echo-server.js",
+    "serve": "node serve.js"
+  },
+  "dependencies": {
+    "ws": "^8.0.0"
+  }
+}
