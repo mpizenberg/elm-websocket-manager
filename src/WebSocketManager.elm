@@ -248,13 +248,13 @@ withBinaryPolling config toMsg handler event model =
     in
     case event of
         Opened ->
-            ( newModel, Cmd.batch [ cmd, receiveBytesInternal config toMsg ] )
+            ( newModel, Cmd.batch [ cmd, receiveBytes config toMsg ] )
 
         Reconnected ->
-            ( newModel, Cmd.batch [ cmd, receiveBytesInternal config toMsg ] )
+            ( newModel, Cmd.batch [ cmd, receiveBytes config toMsg ] )
 
         BinaryReceived _ ->
-            ( newModel, Cmd.batch [ cmd, receiveBytesInternal config toMsg ] )
+            ( newModel, Cmd.batch [ cmd, receiveBytes config toMsg ] )
 
         _ ->
             ( newModel, cmd )
@@ -640,25 +640,6 @@ recvUrl (Config params) =
     xhrPrefix ++ "/ws-recv/" ++ Url.percentEncode params.url
 
 
-bytesResolver : Http.Response Bytes -> Result Http.Error Bytes
-bytesResolver response =
-    case response of
-        Http.BadUrl_ url ->
-            Err (Http.BadUrl url)
-
-        Http.Timeout_ ->
-            Err Http.Timeout
-
-        Http.NetworkError_ ->
-            Err Http.NetworkError
-
-        Http.BadStatus_ metadata _ ->
-            Err (Http.BadStatus metadata.statusCode)
-
-        Http.GoodStatus_ _ body ->
-            Ok body
-
-
 {-| Send binary data through a WebSocket connection. Uses an XHR monkeypatch
 under the hood to pass `Bytes` from Elm to JavaScript without JSON encoding.
 
@@ -680,58 +661,42 @@ sendBytes config bytes toMsg =
 
 {-| Long-poll for the next binary message on a WebSocket connection. Call again
 from the success branch to keep receiving. A `BadStatus 499` signals that the
-connection was closed.
+connection was closed; other HTTP errors are mapped to `Error` events.
 
-    WS.receiveBytes config toMsg
+    WS.receiveBytes config GotWsEvent
 
 -}
-receiveBytes : Config -> (Result Http.Error Bytes -> msg) -> Cmd msg
+receiveBytes : Config -> (Result Decode.Error Event -> msg) -> Cmd msg
 receiveBytes config toMsg =
     Http.request
         { method = "GET"
         , headers = []
         , url = recvUrl config
         , body = Http.emptyBody
-        , expect = Http.expectBytesResponse toMsg bytesResolver
+        , expect = Http.expectBytesResponse toMsg bytesEventResolver
         , timeout = Nothing
         , tracker = Nothing
         }
 
 
-{-| Internal: receive binary routed through the Event msg constructor.
-Maps Ok bytes to BinaryReceived, 499 to NoOp, other errors to Error event.
--}
-receiveBytesInternal : Config -> (Result Decode.Error Event -> msg) -> Cmd msg
-receiveBytesInternal config toMsg =
-    receiveBytes config
-        (\result ->
-            case result of
-                Ok bytes ->
-                    toMsg (Ok (BinaryReceived bytes))
+bytesEventResolver : Http.Response Bytes -> Result Decode.Error Event
+bytesEventResolver response =
+    case response of
+        Http.GoodStatus_ _ body ->
+            Ok (BinaryReceived body)
 
-                -- XHR polling stopped
-                Err (Http.BadStatus 499) ->
-                    toMsg (Ok NoOp)
+        Http.BadStatus_ metadata _ ->
+            if metadata.statusCode == 499 then
+                Ok NoOp
 
-                Err err ->
-                    toMsg (Ok (Error ("Binary receive error: " ++ httpErrorToString err)))
-        )
+            else
+                Ok (Error ("Binary receive error: Bad status: " ++ String.fromInt metadata.statusCode))
 
+        Http.Timeout_ ->
+            Ok (Error "Binary receive error: Timeout")
 
-httpErrorToString : Http.Error -> String
-httpErrorToString err =
-    case err of
-        Http.BadUrl url ->
-            "Bad URL: " ++ url
+        Http.NetworkError_ ->
+            Ok (Error "Binary receive error: Network error")
 
-        Http.Timeout ->
-            "Timeout"
-
-        Http.NetworkError ->
-            "Network error"
-
-        Http.BadStatus status ->
-            "Bad status: " ++ String.fromInt status
-
-        Http.BadBody body ->
-            "Bad body: " ++ body
+        Http.BadUrl_ url ->
+            Ok (Error ("Binary receive error: Bad URL: " ++ url))
