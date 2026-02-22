@@ -27,7 +27,16 @@ port wsIn : WS.EventPort msg
 
 echoConfig : WS.Config
 echoConfig =
-    WS.init "ws://localhost:8080"
+    -- WS.init "ws://localhost:8080"
+    let
+        default =
+            WS.defaultReconnect
+    in
+    WS.initWithParams
+        { url = "ws://localhost:8080"
+        , protocols = []
+        , reconnect = Just { default | maxRetries = Just 3 }
+        }
 
 
 echoWs : WS.WebSocket Msg
@@ -510,6 +519,7 @@ decodeBytesList bytes =
         )
         bytes
         |> Maybe.withDefault []
+
 
 
 -- MAIN
