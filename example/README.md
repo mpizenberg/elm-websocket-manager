@@ -1,7 +1,7 @@
 # elm-websocket-manager example
 
 A WebSocket echo client demonstrating the full `elm-websocket-manager` API:
-config-based identity, the `withPorts` convenience layer, `onEvent` subscription,
+config-based identity, the `bind` convenience layer, `onEvent` subscription,
 connection state tracking, and automatic reconnection with lifecycle events.
 
 ## Setup

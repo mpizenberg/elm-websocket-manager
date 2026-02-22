@@ -1,18 +1,12 @@
 module WebSocketManager exposing
-    ( Config, Params, init
-    , WebSocket, withPorts, CommandPort, EventPort
+    ( Config, Params, init, initWithParams
+    , WebSocket, bind, CommandPort, EventPort
     , WsEvent, onEvent
     , Event(..), CloseInfo, ReconnectInfo
     , CloseCode(..), closeCodeToInt, closeCodeFromInt
     , ReconnectConfig, defaultReconnect
     , ConnectionState(..), connectionStateFromEvent
     , Command(..), encode, eventDecoder
-    -- Quick start: configure, wire, use
-    -- Close codes
-    -- Reconnection
-    -- Advanced: typed commands
-    -- Connection state (optional helper)
-    -- Events (pattern match on these)
     )
 
 {-| Type-safe WebSocket management with reconnection support via structured ports.
@@ -20,8 +14,8 @@ module WebSocketManager exposing
 
 # Quick Start
 
-@docs Config, Params, init
-@docs WebSocket, withPorts, CommandPort, EventPort
+@docs Config, Params, init, initWithParams
+@docs WebSocket, bind, CommandPort, EventPort
 @docs WsEvent, onEvent
 
 
@@ -75,10 +69,36 @@ type alias Params =
     }
 
 
-{-| Create a `Config` from parameters.
+{-| Create a `Config` from a URL with default settings: no sub-protocols
+and default reconnection enabled.
+
+    chatConfig : WS.Config
+    chatConfig =
+        WS.init "ws://example.com/chat"
+
 -}
-init : Params -> Config
-init params =
+init : String -> Config
+init url =
+    Config
+        { url = url
+        , protocols = []
+        , reconnect = Just defaultReconnect
+        }
+
+
+{-| Create a `Config` from full parameters for advanced use cases.
+
+    chatConfig : WS.Config
+    chatConfig =
+        WS.initWithParams
+            { url = "ws://example.com/chat"
+            , protocols = [ "graphql-ws" ]
+            , reconnect = Nothing
+            }
+
+-}
+initWithParams : Params -> Config
+initWithParams params =
     Config params
 
 
@@ -113,9 +133,7 @@ type alias EventPort msg =
 type Command
     = Open
     | Send String
-    | Close
-    | CloseWith CloseCode String
-    | ConfigureReconnect (Maybe ReconnectConfig)
+    | CloseWith (Maybe CloseCode) (Maybe String)
 
 
 {-| Encode a command for a given config, ready to be sent through a command port.
@@ -138,26 +156,26 @@ encode (Config params) command =
                 , ( "data", Encode.string data )
                 ]
 
-        Close ->
+        CloseWith maybeCode maybeReason ->
             Encode.object
-                [ ( "tag", Encode.string "close" )
-                , ( "id", Encode.string params.url )
-                ]
+                ([ ( "tag", Encode.string "close" )
+                 , ( "id", Encode.string params.url )
+                 ]
+                    ++ (case maybeCode of
+                            Just code ->
+                                [ ( "code", Encode.int (closeCodeToInt code) ) ]
 
-        CloseWith code reason ->
-            Encode.object
-                [ ( "tag", Encode.string "close" )
-                , ( "id", Encode.string params.url )
-                , ( "code", Encode.int (closeCodeToInt code) )
-                , ( "reason", Encode.string reason )
-                ]
+                            Nothing ->
+                                []
+                       )
+                    ++ (case maybeReason of
+                            Just reason ->
+                                [ ( "reason", Encode.string reason ) ]
 
-        ConfigureReconnect maybeConfig ->
-            Encode.object
-                [ ( "tag", Encode.string "configureReconnect" )
-                , ( "id", Encode.string params.url )
-                , ( "reconnect", encodeReconnect maybeConfig )
-                ]
+                            Nothing ->
+                                []
+                       )
+                )
 
 
 
@@ -170,8 +188,7 @@ type alias WebSocket msg =
     { open : Cmd msg
     , send : String -> Cmd msg
     , close : Cmd msg
-    , closeWith : CloseCode -> String -> Cmd msg
-    , configureReconnect : Maybe ReconnectConfig -> Cmd msg
+    , closeWith : Maybe CloseCode -> Maybe String -> Cmd msg
     }
 
 
@@ -179,16 +196,15 @@ type alias WebSocket msg =
 
     chatWs : WS.WebSocket Msg
     chatWs =
-        WS.withPorts chatConfig wsOut
+        WS.bind chatConfig wsOut
 
 -}
-withPorts : Config -> CommandPort msg -> WebSocket msg
-withPorts config port_ =
+bind : Config -> CommandPort msg -> WebSocket msg
+bind config port_ =
     { open = port_ (encode config Open)
     , send = \data -> port_ (encode config (Send data))
-    , close = port_ (encode config Close)
+    , close = port_ (encode config (CloseWith Nothing Nothing))
     , closeWith = \code reason -> port_ (encode config (CloseWith code reason))
-    , configureReconnect = \rc -> port_ (encode config (ConfigureReconnect rc))
     }
 
 
@@ -229,7 +245,7 @@ type alias ReconnectInfo =
 {-| A WebSocket event paired with the `Config` it belongs to.
 -}
 type alias WsEvent =
-    { config : Config
+    { wsConfig : Config
     , event : Event
     }
 
@@ -316,7 +332,7 @@ tryConfigs configs value =
         config :: rest ->
             case Decode.decodeValue (eventDecoder config) value of
                 Ok event ->
-                    Ok { config = config, event = event }
+                    Ok { wsConfig = config, event = event }
 
                 Err _ ->
                     tryConfigs rest value

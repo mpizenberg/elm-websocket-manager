@@ -9,10 +9,10 @@
         <div id="app"></div>
         <script src="main.js"></script>
         <script type="module">
-            import { create } from "./js/websocket-manager.js";
+            import * as wsm from "./js/websocket-manager.js";
 
             const app = Elm.Main.init({ node: document.getElementById("app") });
-            create({ wsOut: app.ports.wsOut, wsIn: app.ports.wsIn });
+            wsm.init({ wsOut: app.ports.wsOut, wsIn: app.ports.wsIn });
         </script>
     </body>
 </html>

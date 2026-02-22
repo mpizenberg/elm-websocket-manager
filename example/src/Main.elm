@@ -5,7 +5,7 @@ import Html exposing (Html, button, div, h1, h2, input, li, p, span, text, ul)
 import Html.Attributes exposing (disabled, placeholder, style, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Json.Decode as Decode
-import WebSocketManager as WS exposing (CloseCode(..), Event(..))
+import WebSocketManager as WS
 
 
 
@@ -24,16 +24,12 @@ port wsIn : WS.EventPort msg
 
 echoConfig : WS.Config
 echoConfig =
-    WS.init
-        { url = "ws://localhost:8080"
-        , protocols = []
-        , reconnect = Just WS.defaultReconnect
-        }
+    WS.init "ws://localhost:8080"
 
 
 echoWs : WS.WebSocket Msg
 echoWs =
-    WS.withPorts echoConfig wsOut
+    WS.bind echoConfig wsOut
 
 
 
@@ -122,7 +118,7 @@ update msg model =
 handleEvent : WS.Event -> Model -> ( Model, Cmd Msg )
 handleEvent event model =
     case event of
-        Opened ->
+        WS.Opened ->
             ( { model
                 | connectionState = WS.Connected
                 , messages = logStatus "Connected" :: model.messages
@@ -130,12 +126,12 @@ handleEvent event model =
             , Cmd.none
             )
 
-        MessageReceived data ->
+        WS.MessageReceived data ->
             ( { model | messages = logReceived data :: model.messages }
             , Cmd.none
             )
 
-        Closed info ->
+        WS.Closed info ->
             ( { model
                 | connectionState = WS.Disconnected info
                 , messages = logStatus (closedMessage info) :: model.messages
@@ -143,12 +139,12 @@ handleEvent event model =
             , Cmd.none
             )
 
-        Error message ->
+        WS.Error message ->
             ( { model | messages = logStatus ("Error: " ++ message) :: model.messages }
             , Cmd.none
             )
 
-        Reconnecting info ->
+        WS.Reconnecting info ->
             ( { model
                 | connectionState = WS.ReconnectingState info
                 , messages = logStatus (reconnectingMessage info) :: model.messages
@@ -156,7 +152,7 @@ handleEvent event model =
             , Cmd.none
             )
 
-        Reconnected ->
+        WS.Reconnected ->
             ( { model
                 | connectionState = WS.Connected
                 , messages = logStatus "Reconnected" :: model.messages
@@ -164,7 +160,7 @@ handleEvent event model =
             , Cmd.none
             )
 
-        ReconnectFailed ->
+        WS.ReconnectFailed ->
             ( { model
                 | connectionState = WS.Failed
                 , messages = logStatus "Reconnection failed (max retries exhausted)" :: model.messages

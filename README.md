@@ -30,31 +30,27 @@ port wsIn : WS.EventPort msg
 Wire them in JS:
 
 ```javascript
-import { create } from "elm-websocket-manager";
+import * as wsm from "elm-websocket-manager";
 
 const app = Elm.Main.init({ node: document.getElementById("app") });
-create({ wsOut: app.ports.wsOut, wsIn: app.ports.wsIn });
+wsm.init({ wsOut: app.ports.wsOut, wsIn: app.ports.wsIn });
 ```
 
 ## Usage
 
 ```elm
-import WebSocketManager as WS exposing (Event(..), CloseCode(..))
+import WebSocketManager as WS
 
 -- Configure a connection
 chatConfig : WS.Config
 chatConfig =
-    WS.init
-        { url = "ws://example.com/chat"
-        , protocols = []
-        , reconnect = Just WS.defaultReconnect
-        }
+    WS.init "ws://example.com/chat"
 
--- Bind to a port — returns a record of command functions
+-- Bind to the command port — returns a record of command functions
 chatWs : WS.WebSocket Msg
-chatWs = WS.withPorts chatConfig wsOut
+chatWs = WS.bind chatConfig wsOut
 
--- Use it: no socket IDs to thread
+-- Use it
 update msg model =
     case msg of
         Connect    -> ( model, chatWs.open )
@@ -73,13 +69,13 @@ Handle events by pattern matching:
 case msg of
     GotWsEvent (Ok { event }) ->
         case event of
-            Opened               -> -- connected
-            MessageReceived data -> -- got a message
-            Closed info          -> -- closed {code, reason, wasCleaned}
-            Reconnecting info    -> -- reconnecting {attempt, nextDelayMs, maxRetries}
-            Reconnected          -> -- back online
-            ReconnectFailed      -> -- gave up
-            Error message        -> -- error
+            WS.Opened               -> -- connected
+            WS.MessageReceived data -> -- got a message
+            WS.Closed info          -> -- closed {code, reason, wasClean}
+            WS.Reconnecting info    -> -- reconnecting {attempt, nextDelayMs, maxRetries}
+            WS.Reconnected          -> -- back online
+            WS.ReconnectFailed      -> -- gave up
+            WS.Error message        -> -- error
 
     GotWsEvent (Err _) ->
         -- decode error
@@ -90,17 +86,17 @@ case msg of
 Each `Config` produces its own `WebSocket msg` record. Dispatch events by comparing configs:
 
 ```elm
-chatWs = WS.withPorts chatConfig wsOut
-notifWs = WS.withPorts notifConfig wsOut
+chatWs = WS.bind chatConfig wsOut
+notifWs = WS.bind notifConfig wsOut
 
 subscriptions _ =
     WS.onEvent wsIn [ chatConfig, notifConfig ] GotWsEvent
 
 -- In update:
-GotWsEvent (Ok { config, event }) ->
-    if config == chatConfig then
+GotWsEvent (Ok { wsConfig, event }) ->
+    if wsConfig == chatConfig then
         handleChat event model
-    else if config == notifConfig then
+    else if wsConfig == notifConfig then
         handleNotif event model
     else
         ( model, Cmd.none )
@@ -108,7 +104,7 @@ GotWsEvent (Ok { config, event }) ->
 
 ## Reconnection
 
-Reconnection is opt-in. Pass `reconnect = Just WS.defaultReconnect` to enable exponential backoff with jitter. Customize the config or pass `Nothing` to disable:
+`WS.init` enables reconnection by default with `WS.defaultReconnect`. Use `WS.initWithParams` for full control — pass `reconnect = Nothing` to disable, or customize the config:
 
 ```elm
 { maxRetries = Nothing       -- Nothing = infinite
@@ -116,26 +112,26 @@ Reconnection is opt-in. Pass `reconnect = Just WS.defaultReconnect` to enable ex
 , maxDelayMs = 30000
 , backoffMultiplier = 2.0
 , jitter = True
-, skipCodes = [ Normal, PolicyViolation ]
+, skipCodes = [ WS.Normal, WS.PolicyViolation ]
 }
 ```
 
-The JS side manages timers. Elm receives `Reconnecting`, `Reconnected`, and `ReconnectFailed` events for UI updates.
+The JS side manages timers. Elm receives `Reconnecting`, `Reconnected`, and `ReconnectFailed` events for UI updates. If you need to change the reconnection config at runtime, create a new connection with different parameters instead.
 
 ## Close codes
 
 RFC 6455 codes are a union type:
 
 ```elm
-chatWs.closeWith Normal "session ended"
+chatWs.closeWith (Just WS.Normal) (Just "session ended")
 
 case event of
-    Closed { code } ->
+    WS.Closed { code } ->
         case code of
-            Normal          -> -- clean shutdown
-            AbnormalClosure -> -- network dropped
-            CustomCode 4001 -> -- app-specific
-            _               -> -- other
+            WS.Normal          -> -- clean shutdown
+            WS.AbnormalClosure -> -- network dropped
+            WS.CustomCode 4001 -> -- app-specific
+            _                  -> -- other
 ```
 
 ## Connection state helper
@@ -150,12 +146,12 @@ case WS.connectionStateFromEvent event of
 
 ## Advanced: typed commands
 
-For logging, testing, or command pipelines, use the `Command` type directly instead of `withPorts`:
+For logging, testing, or command pipelines, use the `Command` type directly instead of `bind`:
 
 ```elm
-WS.encode chatConfig Open |> wsOut
-WS.encode chatConfig (Send "hello") |> wsOut
-WS.encode chatConfig (CloseWith Normal "done") |> wsOut
+WS.encode chatConfig WS.Open |> wsOut
+WS.encode chatConfig (WS.Send "hello") |> wsOut
+WS.encode chatConfig (WS.CloseWith (Just WS.Normal) (Just "done")) |> wsOut
 ```
 
 ## Example

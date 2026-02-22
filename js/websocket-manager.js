@@ -1,7 +1,7 @@
 // elm-websocket-manager companion JS module.
 // See DESIGN.md for the full wire protocol specification.
 
-export function create(ports) {
+export function init(ports) {
   const sockets = new Map();
 
   ports.wsOut.subscribe((cmd) => {
@@ -14,9 +14,6 @@ export function create(ports) {
         break;
       case "close":
         closeSocket(cmd);
-        break;
-      case "configureReconnect":
-        configureReconnect(cmd);
         break;
     }
   });
@@ -128,13 +125,6 @@ export function create(ports) {
       entry.intentionalClose = true;
       clearTimeout(entry.reconnectTimer);
       entry.ws.close(code || 1000, reason || "");
-    }
-  }
-
-  function configureReconnect({ id, reconnect }) {
-    const entry = sockets.get(id);
-    if (entry) {
-      entry.reconnect = reconnect;
     }
   }
 
