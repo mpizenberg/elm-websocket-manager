@@ -10,10 +10,15 @@ const wss = new WebSocketServer({ port });
 wss.on("connection", (ws) => {
   console.log("Client connected");
 
-  ws.on("message", (data) => {
-    const msg = data.toString();
-    console.log("Received:", msg);
-    ws.send(msg);
+  ws.on("message", (data, isBinary) => {
+    if (isBinary) {
+      console.log("Received binary:", data.length, "bytes");
+      ws.send(data);
+    } else {
+      const msg = data.toString();
+      console.log("Received:", msg);
+      ws.send(msg);
+    }
   });
 
   ws.on("close", (code, reason) => {

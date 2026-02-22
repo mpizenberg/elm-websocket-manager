@@ -2,6 +2,7 @@ module WebSocketManager exposing
     ( Config, Params, init, initWithParams
     , WebSocket, bind, CommandPort, EventPort
     , onEvent
+    , sendBytes, receiveBytes
     , Event(..), CloseInfo, ReconnectInfo
     , CloseCode(..), closeCodeToInt, closeCodeFromInt
     , ReconnectConfig, defaultReconnect
@@ -17,6 +18,11 @@ module WebSocketManager exposing
 @docs Config, Params, init, initWithParams
 @docs WebSocket, bind, CommandPort, EventPort
 @docs onEvent
+
+
+# Binary (Bytes)
+
+@docs sendBytes, receiveBytes
 
 
 # Events
@@ -45,8 +51,11 @@ module WebSocketManager exposing
 
 -}
 
+import Bytes exposing (Bytes)
+import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode
+import Url
 
 
 
@@ -560,3 +569,80 @@ connectionStateFromEvent event =
 
         _ ->
             Nothing
+
+
+
+-- BINARY (BYTES)
+
+
+xhrPrefix : String
+xhrPrefix =
+    "https://elm-ws-bytes.localhost/.xhrhook"
+
+
+sendUrl : Config -> String
+sendUrl (Config params) =
+    xhrPrefix ++ "/ws-send/" ++ Url.percentEncode params.url
+
+
+recvUrl : Config -> String
+recvUrl (Config params) =
+    xhrPrefix ++ "/ws-recv/" ++ Url.percentEncode params.url
+
+
+bytesResolver : Http.Response Bytes -> Result Http.Error Bytes
+bytesResolver response =
+    case response of
+        Http.BadUrl_ url ->
+            Err (Http.BadUrl url)
+
+        Http.Timeout_ ->
+            Err Http.Timeout
+
+        Http.NetworkError_ ->
+            Err Http.NetworkError
+
+        Http.BadStatus_ metadata _ ->
+            Err (Http.BadStatus metadata.statusCode)
+
+        Http.GoodStatus_ _ body ->
+            Ok body
+
+
+{-| Send binary data through a WebSocket connection. Uses an XHR monkeypatch
+under the hood to pass `Bytes` from Elm to JavaScript without JSON encoding.
+
+    WS.sendBytes echoConfig payload GotBytesSent
+
+-}
+sendBytes : Config -> Bytes -> (Result Http.Error () -> msg) -> Cmd msg
+sendBytes config bytes toMsg =
+    Http.request
+        { method = "POST"
+        , headers = []
+        , url = sendUrl config
+        , body = Http.bytesBody "application/octet-stream" bytes
+        , expect = Http.expectWhatever toMsg
+        , timeout = Nothing
+        , tracker = Nothing
+        }
+
+
+{-| Long-poll for the next binary message on a WebSocket connection. Call again
+from the success branch to keep receiving. A `BadStatus 499` signals that the
+connection was closed.
+
+    WS.receiveBytes echoConfig GotBinaryMessage
+
+-}
+receiveBytes : Config -> (Result Http.Error Bytes -> msg) -> Cmd msg
+receiveBytes config toMsg =
+    Http.request
+        { method = "GET"
+        , headers = []
+        , url = recvUrl config
+        , body = Http.emptyBody
+        , expect = Http.expectBytesResponse toMsg bytesResolver
+        , timeout = Nothing
+        , tracker = Nothing
+        }

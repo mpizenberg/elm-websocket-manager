@@ -1,9 +1,13 @@
 port module Main exposing (main)
 
 import Browser
+import Bytes exposing (Bytes)
+import Bytes.Decode
+import Bytes.Encode
 import Html exposing (Html, button, div, h1, h2, input, li, p, span, text, ul)
 import Html.Attributes exposing (disabled, placeholder, style, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
+import Http
 import Json.Decode as Decode
 import WebSocketManager as WS
 
@@ -76,6 +80,9 @@ type Msg
     | SendClicked
     | ConnectClicked
     | DisconnectClicked
+    | SendBinaryClicked
+    | GotBytesSent (Result Http.Error ())
+    | GotBinaryMessage (Result Http.Error Bytes)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -120,6 +127,41 @@ update msg model =
         DisconnectClicked ->
             ( model, echoWs.close )
 
+        SendBinaryClicked ->
+            ( { model | messages = logSent "Binary: [1, 2, 3]" :: model.messages }
+            , WS.sendBytes echoConfig buildTestPayload GotBytesSent
+            )
+
+        GotBytesSent (Err err) ->
+            ( { model | messages = logStatus ("Binary send error: " ++ httpErrorToString err) :: model.messages }
+            , Cmd.none
+            )
+
+        GotBytesSent (Ok ()) ->
+            ( model, Cmd.none )
+
+        GotBinaryMessage (Ok bytes) ->
+            let
+                decoded =
+                    decodeBytesList bytes
+
+                label =
+                    "Binary: [" ++ String.join ", " (List.map String.fromInt decoded) ++ "]"
+            in
+            ( { model | messages = logReceived label :: model.messages }
+            , WS.receiveBytes echoConfig GotBinaryMessage
+            )
+
+        GotBinaryMessage (Err (Http.BadStatus 499)) ->
+            ( { model | messages = logStatus "Binary channel closed" :: model.messages }
+            , Cmd.none
+            )
+
+        GotBinaryMessage (Err err) ->
+            ( { model | messages = logStatus ("Binary recv error: " ++ httpErrorToString err) :: model.messages }
+            , Cmd.none
+            )
+
 
 handleEvent : WS.Event -> Model -> ( Model, Cmd Msg )
 handleEvent event model =
@@ -129,7 +171,7 @@ handleEvent event model =
                 | connectionState = WS.Connected
                 , messages = logStatus "Connected" :: model.messages
               }
-            , Cmd.none
+            , WS.receiveBytes echoConfig GotBinaryMessage
             )
 
         WS.MessageReceived data ->
@@ -163,7 +205,7 @@ handleEvent event model =
                 | connectionState = WS.Connected
                 , messages = logStatus "Reconnected" :: model.messages
               }
-            , Cmd.none
+            , WS.receiveBytes echoConfig GotBinaryMessage
             )
 
         WS.ReconnectFailed ->
@@ -349,6 +391,15 @@ viewControls model =
                 , style "cursor" "pointer"
                 ]
                 [ text "Disconnect" ]
+            , button
+                [ onClick SendBinaryClicked
+                , disabled (not isConnected)
+                , style "padding" "6px 12px"
+                , style "border" "1px solid #d1d5db"
+                , style "border-radius" "4px"
+                , style "cursor" "pointer"
+                ]
+                [ text "Send Binary [1,2,3]" ]
             ]
         ]
 
@@ -383,6 +434,59 @@ viewLogEntry entry =
         , style "font-size" "0.9em"
         ]
         [ text (prefix ++ entry.text) ]
+
+
+
+-- BINARY HELPERS
+
+
+buildTestPayload : Bytes
+buildTestPayload =
+    [ 1, 2, 3 ]
+        |> List.map Bytes.Encode.unsignedInt8
+        |> Bytes.Encode.sequence
+        |> Bytes.Encode.encode
+
+
+decodeBytesList : Bytes -> List Int
+decodeBytesList bytes =
+    let
+        width =
+            Bytes.width bytes
+    in
+    Bytes.Decode.decode
+        (Bytes.Decode.loop ( width, [] )
+            (\( remaining, acc ) ->
+                if remaining <= 0 then
+                    Bytes.Decode.succeed (Bytes.Decode.Done (List.reverse acc))
+
+                else
+                    Bytes.Decode.map
+                        (\byte -> Bytes.Decode.Loop ( remaining - 1, byte :: acc ))
+                        Bytes.Decode.unsignedInt8
+            )
+        )
+        bytes
+        |> Maybe.withDefault []
+
+
+httpErrorToString : Http.Error -> String
+httpErrorToString err =
+    case err of
+        Http.BadUrl url ->
+            "Bad URL: " ++ url
+
+        Http.Timeout ->
+            "Timeout"
+
+        Http.NetworkError ->
+            "Network Error"
+
+        Http.BadStatus status ->
+            "Bad Status: " ++ String.fromInt status
+
+        Http.BadBody body ->
+            "Bad Body: " ++ body
 
 
 
