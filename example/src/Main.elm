@@ -80,6 +80,7 @@ type Msg
     | ConnectClicked
     | DisconnectClicked
     | SendBinaryClicked
+    | SendLargeBinaryClicked
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -129,6 +130,15 @@ update msg model =
             , echoWs.sendBytes buildTestPayload
             )
 
+        SendLargeBinaryClicked ->
+            let
+                size =
+                    Bytes.width largePayload
+            in
+            ( { model | messages = logSent ("Binary: " ++ formatBytes size) :: model.messages }
+            , echoWs.sendBytes largePayload
+            )
+
 
 handleEvent : WS.Event -> Model -> ( Model, Cmd Msg )
 handleEvent event model =
@@ -148,11 +158,19 @@ handleEvent event model =
 
         WS.BinaryReceived bytes ->
             let
-                decoded =
-                    decodeBytesList bytes
+                size =
+                    Bytes.width bytes
 
                 label =
-                    "Binary: [" ++ String.join ", " (List.map String.fromInt decoded) ++ "]"
+                    if size > 10 then
+                        "Binary: " ++ formatBytes size
+
+                    else
+                        let
+                            decoded =
+                                decodeBytesList bytes
+                        in
+                        "Binary: [" ++ String.join ", " (List.map String.fromInt decoded) ++ "]"
             in
             ( { model | messages = logReceived label :: model.messages }
             , Cmd.none
@@ -382,6 +400,15 @@ viewControls model =
                 , style "cursor" "pointer"
                 ]
                 [ text "Send Binary [1,2,3]" ]
+            , button
+                [ onClick SendLargeBinaryClicked
+                , disabled (not isConnected)
+                , style "padding" "6px 12px"
+                , style "border" "1px solid #d1d5db"
+                , style "border-radius" "4px"
+                , style "cursor" "pointer"
+                ]
+                [ text "Send 100MB Binary" ]
             ]
         ]
 
@@ -428,6 +455,39 @@ buildTestPayload =
         |> List.map Bytes.Encode.unsignedInt8
         |> Bytes.Encode.sequence
         |> Bytes.Encode.encode
+
+
+largePayload : Bytes
+largePayload =
+    let
+        -- 1 KB chunk (256 x 4-byte int32)
+        oneKB =
+            List.repeat 256 (Bytes.Encode.unsignedInt32 Bytes.BE 0)
+                |> Bytes.Encode.sequence
+                |> Bytes.Encode.encode
+
+        -- 1 MB = 1024 x 1KB
+        oneMB =
+            List.repeat 1024 (Bytes.Encode.bytes oneKB)
+                |> Bytes.Encode.sequence
+                |> Bytes.Encode.encode
+    in
+    -- 100 MB = 100 x 1MB
+    List.repeat 100 (Bytes.Encode.bytes oneMB)
+        |> Bytes.Encode.sequence
+        |> Bytes.Encode.encode
+
+
+formatBytes : Int -> String
+formatBytes size =
+    if size >= 1024 * 1024 then
+        String.fromInt (size // (1024 * 1024)) ++ " MB (" ++ String.fromInt size ++ " bytes)"
+
+    else if size >= 1024 then
+        String.fromInt (size // 1024) ++ " KB (" ++ String.fromInt size ++ " bytes)"
+
+    else
+        String.fromInt size ++ " bytes"
 
 
 decodeBytesList : Bytes -> List Int
