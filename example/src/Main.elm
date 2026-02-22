@@ -193,11 +193,6 @@ handleEvent event model =
             , Cmd.none
             )
 
-        WS.Error message ->
-            ( { model | messages = logStatus ("Error: " ++ message) :: model.messages }
-            , Cmd.none
-            )
-
         WS.Reconnecting info ->
             ( { model
                 | connectionState = WS.ReconnectingState info
@@ -214,9 +209,6 @@ handleEvent event model =
             , Cmd.none
             )
 
-        WS.NoOp ->
-            ( model, Cmd.none )
-
         WS.ReconnectFailed ->
             ( { model
                 | connectionState = WS.Failed
@@ -224,6 +216,14 @@ handleEvent event model =
               }
             , Cmd.none
             )
+
+        WS.Error message ->
+            ( { model | messages = logStatus ("Error: " ++ message) :: model.messages }
+            , Cmd.none
+            )
+
+        WS.NoOp ->
+            ( model, Cmd.none )
 
 
 closedMessage : WS.CloseInfo -> String

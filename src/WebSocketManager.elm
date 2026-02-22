@@ -275,12 +275,12 @@ type Event
     = Opened
     | MessageReceived String
     | BinaryReceived Bytes
-    | NoOp
     | Closed CloseInfo
-    | Error String
     | Reconnecting ReconnectInfo
     | Reconnected
     | ReconnectFailed
+    | Error String
+    | NoOp
 
 
 {-| Information about a WebSocket close event.
