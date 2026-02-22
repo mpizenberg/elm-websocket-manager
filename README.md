@@ -1,8 +1,8 @@
 # elm-websocket-manager
 
-Type-safe WebSocket management for Elm 0.19 with reconnection support.
+Type-safe WebSocket management for Elm 0.19 with reconnection and binary (Bytes) support.
 
-Provides Elm types, encoders, decoders, and a companion JS module. You declare two ports and wire them in; everything else is typed Elm code.
+Provides Elm types, encoders, decoders, and a companion JS module. You declare two ports and wire them in; everything else is typed Elm code. Binary data transfers bypass JSON entirely via an XHR monkeypatch, giving zero-cost `Bytes` interop.
 
 ## Install
 
@@ -46,18 +46,24 @@ chatConfig : WS.Config
 chatConfig =
     WS.init "ws://example.com/chat"
 
--- Bind to the command port — returns a record of command functions
+-- Bind to the command port — returns a record of command functions.
+-- The GotChatEvent constructor is used internally to route binary XHR results
+-- through your normal event handling.
 chatWs : WS.WebSocket Msg
-chatWs = WS.bind chatConfig wsOut
+chatWs =
+    WS.bind chatConfig wsOut GotChatEvent
 
 -- Use it
 update msg model =
     case msg of
-        Connect           -> ( model, chatWs.open )
-        Send text         -> ( model, chatWs.send text )
-        Disconnect        -> ( model, chatWs.close )
-        GotChatEvent ...  -> ...
-        WsDecodeError ... -> ...
+        GotChatEvent (Ok event) ->
+            WS.withBinaryPolling chatConfig GotChatEvent handleChat event model
+        GotChatEvent (Err _)    -> ...
+        WsDecodeError _         -> ...
+        Connect                 -> ( model, chatWs.open )
+        SendText text           -> ( model, chatWs.sendText text )
+        SendBinary bytes        -> ( model, chatWs.sendBytes bytes )
+        Disconnect              -> ( model, chatWs.close )
 
 -- Subscribe to events
 subscriptions _ =
@@ -67,22 +73,51 @@ subscriptions _ =
 Handle events by pattern matching:
 
 ```elm
-case msg of
-    GotChatEvent (Ok event) ->
-        case event of
-            WS.Opened               -> -- connected
-            WS.MessageReceived data -> -- got a message
-            WS.Closed info          -> -- closed {code, reason, wasClean}
-            WS.Reconnecting info    -> -- reconnecting {attempt, nextDelayMs, maxRetries}
-            WS.Reconnected          -> -- back online
-            WS.ReconnectFailed      -> -- gave up
-            WS.Error message        -> -- error
+handleChat : WS.Event -> Model -> ( Model, Cmd Msg )
+handleChat event model =
+    case event of
+        WS.Opened                  -> -- connected
+        WS.MessageReceived data    -> -- got a text message
+        WS.BinaryReceived bytes    -> -- got a binary message (Bytes)
+        WS.Closed info             -> -- closed {code, reason, wasClean}
+        WS.Reconnecting info       -> -- reconnecting {attempt, nextDelayMs, maxRetries}
+        WS.Reconnected             -> -- back online
+        WS.ReconnectFailed         -> -- gave up
+        WS.Error message           -> -- error
+        WS.NoOp                    -> ( model, Cmd.none )
+```
 
-    GotChatEvent (Err _) ->
-        -- event decode error
+## Binary (Bytes) support
 
-    WsDecodeError _ ->
-        -- missing or unmatched websocket id
+Binary messages are sent and received as Elm `Bytes` with zero JSON overhead. Under the hood, an XHR monkeypatch intercepts requests to a fake `.localhost` URL, routing `ArrayBuffer` data directly between Elm's `Http` kernel and the WebSocket.
+Big thanks to `@lue-bird` for the explanation in his [Bytes-through-port benchmark](https://github.com/lue-bird/elm-bytes-ports-benchmark/tree/main?tab=readme-ov-file#http-taskport).
+
+**Sending** is fire-and-forget via `chatWs.sendBytes`:
+
+```elm
+chatWs.sendBytes myBytes
+```
+
+**Receiving** is automatic when you wrap your event handler with `withBinaryPolling`. It starts a long-poll on `Opened` and `Reconnected`, and re-polls after each `BinaryReceived`:
+
+```elm
+GotChatEvent (Ok event) ->
+    WS.withBinaryPolling chatConfig GotChatEvent handleChat event model
+```
+
+Binary messages arrive as `WS.BinaryReceived bytes` — handle them just like `WS.MessageReceived`.
+
+`WS.NoOp` is an internal plumbing event produced when a fire-and-forget binary send completes or when the binary long-poll is terminated by a connection close. It carries no information and can be safely ignored:
+
+```elm
+WS.NoOp -> ( model, Cmd.none )
+```
+
+For low-level use without `bind`, the standalone `WS.sendBytes` function gives full control over the result:
+
+```elm
+WS.sendBytes chatConfig payload GotChatEvent
+--> Cmd Msg
 ```
 
 ## Multiple connections
@@ -90,8 +125,8 @@ case msg of
 Each `Config` produces its own `WebSocket msg` record. Pair each config with a dedicated message constructor:
 
 ```elm
-chatWs = WS.bind chatConfig wsOut
-notifWs = WS.bind notifConfig wsOut
+chatWs = WS.bind chatConfig wsOut GotChatEvent
+notifWs = WS.bind notifConfig wsOut GotNotifEvent
 
 subscriptions _ =
     WS.onEvent wsIn
@@ -102,10 +137,10 @@ subscriptions _ =
 
 -- In update:
 GotChatEvent (Ok event) ->
-    handleChat event model
+    WS.withBinaryPolling chatConfig GotChatEvent handleChat event model
 
 GotNotifEvent (Ok event) ->
-    handleNotif event model
+    WS.withBinaryPolling notifConfig GotNotifEvent handleNotif event model
 ```
 
 ## Reconnection
@@ -122,7 +157,7 @@ GotNotifEvent (Ok event) ->
 }
 ```
 
-The JS side manages timers. Elm receives `Reconnecting`, `Reconnected`, and `ReconnectFailed` events for UI updates. If you need to change the reconnection config at runtime, create a new connection with different parameters instead.
+The JS side manages timers. Elm receives `Reconnecting`, `Reconnected`, and `ReconnectFailed` events for UI updates. Binary long-polling restarts automatically on reconnect when using `withBinaryPolling`.
 
 ## Close codes
 
@@ -152,17 +187,18 @@ case WS.connectionStateFromEvent event of
 
 ## Advanced: typed commands
 
-For logging, testing, or command pipelines, use the `Command` type directly instead of `bind`:
+For logging, testing, or command pipelines, use the `Command` type directly instead of `bind`.
+You can’t trace Bytes data exchange with the `Command` type though.
 
 ```elm
 WS.encode chatConfig WS.Open |> wsOut
-WS.encode chatConfig (WS.Send "hello") |> wsOut
+WS.encode chatConfig (WS.SendText "hello") |> wsOut
 WS.encode chatConfig (WS.CloseWith (Just WS.Normal) (Just "done")) |> wsOut
 ```
 
 ## Example
 
-See [`example/`](https://github.com/mpizenberg/elm-websocket-manager/tree/main/example) for a runnable echo client with connection state UI and reconnection.
+See [`example/`](https://github.com/mpizenberg/elm-websocket-manager/tree/main/example) for a runnable echo client with text and binary messaging, connection state UI, and reconnection.
 
 ## License
 

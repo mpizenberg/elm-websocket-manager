@@ -141,7 +141,7 @@ type alias EventPort msg =
 -}
 type Command
     = Open
-    | Send String
+    | SendText String
     | CloseWith (Maybe CloseCode) (Maybe String)
 
 
@@ -158,7 +158,7 @@ encode (Config params) command =
                 , ( "reconnect", encodeReconnect params.reconnect )
                 ]
 
-        Send data ->
+        SendText data ->
             Encode.object
                 [ ( "tag", Encode.string "send" )
                 , ( "id", Encode.string params.url )
@@ -216,8 +216,8 @@ handling. Use `withBinaryPolling` to wrap your event handler.
 bind : Config -> CommandPort msg -> (Result Decode.Error Event -> msg) -> WebSocket msg
 bind config port_ toMsg =
     { open = port_ (encode config Open)
-    , sendText = \data -> port_ (encode config (Send data))
-    , sendBytes = \bytes -> sendBytes config bytes (\_ -> toMsg (Ok NoOp))
+    , sendText = \data -> port_ (encode config (SendText data))
+    , sendBytes = \bytes -> sendBytes config bytes toMsg
     , close = port_ (encode config (CloseWith Nothing Nothing))
     , closeWith = \code reason -> port_ (encode config (CloseWith code reason))
     }
@@ -662,17 +662,17 @@ bytesResolver response =
 {-| Send binary data through a WebSocket connection. Uses an XHR monkeypatch
 under the hood to pass `Bytes` from Elm to JavaScript without JSON encoding.
 
-    WS.sendBytes config payload GotBytesSent
+    WS.sendBytes config payload GotWsEvent
 
 -}
-sendBytes : Config -> Bytes -> (Result Http.Error () -> msg) -> Cmd msg
+sendBytes : Config -> Bytes -> (Result Decode.Error Event -> msg) -> Cmd msg
 sendBytes config bytes toMsg =
     Http.request
         { method = "POST"
         , headers = []
         , url = sendUrl config
         , body = Http.bytesBody "application/octet-stream" bytes
-        , expect = Http.expectWhatever toMsg
+        , expect = Http.expectWhatever (\_ -> toMsg (Ok NoOp))
         , timeout = Nothing
         , tracker = Nothing
         }
