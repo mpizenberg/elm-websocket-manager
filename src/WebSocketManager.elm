@@ -540,7 +540,7 @@ type alias ReconnectConfig =
 
     { maxRetries = Nothing
     , initialDelayMs = 1000
-    , maxDelayMs = 30000
+    , maxDelayMs = 300000 -- 5min
     , backoffMultiplier = 2.0
     , jitter = True
     , skipCodes = [ Normal, PolicyViolation ]
