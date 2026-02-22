@@ -32,7 +32,7 @@ export function init(ports) {
       url: id,
       protocols: protocols || [],
       reconnect: reconnect || null,
-      retries: 0,
+      retries: existing ? existing.retries : 0,
       intentionalClose: false,
       reconnectTimer: null,
     };
