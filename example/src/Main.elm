@@ -7,7 +7,6 @@ import Bytes.Encode
 import Html exposing (Html, button, div, h1, h2, input, li, p, span, text, ul)
 import Html.Attributes exposing (disabled, placeholder, style, type_, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
-import Http
 import Json.Decode as Decode
 import WebSocketManager as WS
 
@@ -33,7 +32,7 @@ echoConfig =
 
 echoWs : WS.WebSocket Msg
 echoWs =
-    WS.bind echoConfig wsOut
+    WS.bind echoConfig wsOut GotWsEvent NoOp
 
 
 
@@ -76,20 +75,19 @@ init () =
 type Msg
     = GotWsEvent (Result Decode.Error WS.Event)
     | WsDecodeError Decode.Error
+    | NoOp
     | DraftChanged String
     | SendClicked
     | ConnectClicked
     | DisconnectClicked
     | SendBinaryClicked
-    | GotBytesSent (Result Http.Error ())
-    | GotBinaryMessage (Result Http.Error Bytes)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         GotWsEvent (Ok event) ->
-            handleEvent event model
+            WS.withBinaryPolling echoWs handleEvent event model
 
         GotWsEvent (Err err) ->
             ( { model | messages = logStatus ("Event decode error: " ++ Decode.errorToString err) :: model.messages }
@@ -100,6 +98,9 @@ update msg model =
             ( { model | messages = logStatus ("WS decode error: " ++ Decode.errorToString err) :: model.messages }
             , Cmd.none
             )
+
+        NoOp ->
+            ( model, Cmd.none )
 
         DraftChanged text ->
             ( { model | draft = text }, Cmd.none )
@@ -113,7 +114,7 @@ update msg model =
                     | draft = ""
                     , messages = logSent model.draft :: model.messages
                   }
-                , echoWs.send model.draft
+                , echoWs.sendText model.draft
                 )
 
         ConnectClicked ->
@@ -129,37 +130,7 @@ update msg model =
 
         SendBinaryClicked ->
             ( { model | messages = logSent "Binary: [1, 2, 3]" :: model.messages }
-            , WS.sendBytes echoConfig buildTestPayload GotBytesSent
-            )
-
-        GotBytesSent (Err err) ->
-            ( { model | messages = logStatus ("Binary send error: " ++ httpErrorToString err) :: model.messages }
-            , Cmd.none
-            )
-
-        GotBytesSent (Ok ()) ->
-            ( model, Cmd.none )
-
-        GotBinaryMessage (Ok bytes) ->
-            let
-                decoded =
-                    decodeBytesList bytes
-
-                label =
-                    "Binary: [" ++ String.join ", " (List.map String.fromInt decoded) ++ "]"
-            in
-            ( { model | messages = logReceived label :: model.messages }
-            , WS.receiveBytes echoConfig GotBinaryMessage
-            )
-
-        GotBinaryMessage (Err (Http.BadStatus 499)) ->
-            ( { model | messages = logStatus "Binary channel closed" :: model.messages }
-            , Cmd.none
-            )
-
-        GotBinaryMessage (Err err) ->
-            ( { model | messages = logStatus ("Binary recv error: " ++ httpErrorToString err) :: model.messages }
-            , Cmd.none
+            , echoWs.sendBytes buildTestPayload
             )
 
 
@@ -171,11 +142,23 @@ handleEvent event model =
                 | connectionState = WS.Connected
                 , messages = logStatus "Connected" :: model.messages
               }
-            , WS.receiveBytes echoConfig GotBinaryMessage
+            , Cmd.none
             )
 
         WS.MessageReceived data ->
             ( { model | messages = logReceived data :: model.messages }
+            , Cmd.none
+            )
+
+        WS.BinaryReceived bytes ->
+            let
+                decoded =
+                    decodeBytesList bytes
+
+                label =
+                    "Binary: [" ++ String.join ", " (List.map String.fromInt decoded) ++ "]"
+            in
+            ( { model | messages = logReceived label :: model.messages }
             , Cmd.none
             )
 
@@ -205,7 +188,7 @@ handleEvent event model =
                 | connectionState = WS.Connected
                 , messages = logStatus "Reconnected" :: model.messages
               }
-            , WS.receiveBytes echoConfig GotBinaryMessage
+            , Cmd.none
             )
 
         WS.ReconnectFailed ->
@@ -468,26 +451,6 @@ decodeBytesList bytes =
         )
         bytes
         |> Maybe.withDefault []
-
-
-httpErrorToString : Http.Error -> String
-httpErrorToString err =
-    case err of
-        Http.BadUrl url ->
-            "Bad URL: " ++ url
-
-        Http.Timeout ->
-            "Timeout"
-
-        Http.NetworkError ->
-            "Network Error"
-
-        Http.BadStatus status ->
-            "Bad Status: " ++ String.fromInt status
-
-        Http.BadBody body ->
-            "Bad Body: " ++ body
-
 
 
 -- MAIN

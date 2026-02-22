@@ -1,6 +1,6 @@
 module WebSocketManager exposing
     ( Config, Params, init, initWithParams
-    , WebSocket, bind, CommandPort, EventPort
+    , WebSocket, bind, withBinaryPolling, CommandPort, EventPort
     , onEvent
     , sendBytes, receiveBytes
     , Event(..), CloseInfo, ReconnectInfo
@@ -16,7 +16,7 @@ module WebSocketManager exposing
 # Quick Start
 
 @docs Config, Params, init, initWithParams
-@docs WebSocket, bind, CommandPort, EventPort
+@docs WebSocket, bind, withBinaryPolling, CommandPort, EventPort
 @docs onEvent
 
 
@@ -192,29 +192,70 @@ encode (Config params) command =
 
 
 {-| A record of ready-to-use command functions bound to a specific connection.
+Use `withBinaryPolling` to wrap your event handler and automatically manage the
+binary long-poll lifecycle.
 -}
 type alias WebSocket msg =
     { open : Cmd msg
-    , send : String -> Cmd msg
+    , sendText : String -> Cmd msg
+    , sendBytes : Bytes -> Cmd msg
     , close : Cmd msg
     , closeWith : Maybe CloseCode -> Maybe String -> Cmd msg
+    , receiveBinary : Cmd msg
     }
 
 
 {-| Bind a `Config` to a command port, returning a record of command functions.
+The `toMsg` constructor routes binary receive results through your normal event
+handling. The `noOp` msg absorbs fire-and-forget XHR responses (binary sends).
 
-    chatWs : WS.WebSocket Msg
-    chatWs =
-        WS.bind chatConfig wsOut
+    echoWs : WS.WebSocket Msg
+    echoWs =
+        WS.bind echoConfig wsOut GotWsEvent NoOp
 
 -}
-bind : Config -> CommandPort msg -> WebSocket msg
-bind config port_ =
+bind : Config -> CommandPort msg -> (Result Decode.Error Event -> msg) -> msg -> WebSocket msg
+bind config port_ toMsg noOp =
     { open = port_ (encode config Open)
-    , send = \data -> port_ (encode config (Send data))
+    , sendText = \data -> port_ (encode config (Send data))
+    , sendBytes = \bytes -> sendBytes config bytes (\_ -> noOp)
     , close = port_ (encode config (CloseWith Nothing Nothing))
     , closeWith = \code reason -> port_ (encode config (CloseWith code reason))
+    , receiveBinary = receiveBytesInternal config toMsg noOp
     }
+
+
+{-| Wrap your event handler to automatically manage the binary long-poll
+lifecycle. Starts polling on `Opened` and `Reconnected`, re-polls after each
+`BinaryReceived`.
+
+    GotWsEvent (Ok event) ->
+        WS.withBinaryPolling echoWs handleEvent event model
+
+-}
+withBinaryPolling :
+    WebSocket msg
+    -> (Event -> model -> ( model, Cmd msg ))
+    -> Event
+    -> model
+    -> ( model, Cmd msg )
+withBinaryPolling ws handler event model =
+    let
+        ( newModel, cmd ) =
+            handler event model
+    in
+    case event of
+        Opened ->
+            ( newModel, Cmd.batch [ cmd, ws.receiveBinary ] )
+
+        Reconnected ->
+            ( newModel, Cmd.batch [ cmd, ws.receiveBinary ] )
+
+        BinaryReceived _ ->
+            ( newModel, Cmd.batch [ cmd, ws.receiveBinary ] )
+
+        _ ->
+            ( newModel, cmd )
 
 
 
@@ -226,6 +267,7 @@ bind config port_ =
 type Event
     = Opened
     | MessageReceived String
+    | BinaryReceived Bytes
     | Closed CloseInfo
     | Error String
     | Reconnecting ReconnectInfo
@@ -646,3 +688,42 @@ receiveBytes config toMsg =
         , timeout = Nothing
         , tracker = Nothing
         }
+
+
+{-| Internal: receive binary routed through the Event msg constructor.
+Maps Ok bytes to BinaryReceived, 499 to noOp (channel closed), other errors
+to Error event.
+-}
+receiveBytesInternal : Config -> (Result Decode.Error Event -> msg) -> msg -> Cmd msg
+receiveBytesInternal config toMsg noOp =
+    receiveBytes config
+        (\result ->
+            case result of
+                Ok bytes ->
+                    toMsg (Ok (BinaryReceived bytes))
+
+                Err (Http.BadStatus 499) ->
+                    noOp
+
+                Err err ->
+                    toMsg (Ok (Error ("Binary receive error: " ++ httpErrorToString err)))
+        )
+
+
+httpErrorToString : Http.Error -> String
+httpErrorToString err =
+    case err of
+        Http.BadUrl url ->
+            "Bad URL: " ++ url
+
+        Http.Timeout ->
+            "Timeout"
+
+        Http.NetworkError ->
+            "Network error"
+
+        Http.BadStatus status ->
+            "Bad status: " ++ String.fromInt status
+
+        Http.BadBody body ->
+            "Bad body: " ++ body
