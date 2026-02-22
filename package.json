@@ -13,5 +13,12 @@
     "websocket",
     "ports"
   ],
-  "license": "BSD-3-Clause"
+  "license": "BSD-3-Clause",
+  "scripts": {
+    "postinstall": "elm-tooling install"
+  },
+  "devDependencies": {
+    "elm-review": "^2.13.5",
+    "elm-tooling": "^1.15.1"
+  }
 }
