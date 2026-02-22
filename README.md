@@ -60,6 +60,7 @@ update msg model =
         Connect    -> ( model, chatWs.open )
         Send text  -> ( model, chatWs.send text )
         Disconnect -> ( model, chatWs.close )
+        GotWsEvent ... -> ...
 
 -- Subscribe to events from all connections
 subscriptions _ =
@@ -72,10 +73,10 @@ Handle events by pattern matching:
 case msg of
     GotWsEvent (Ok { event }) ->
         case event of
-            Opened              -> -- connected
+            Opened               -> -- connected
             MessageReceived data -> -- got a message
-            Closed info          -> -- closed (info.code, info.reason, info.wasClean)
-            Reconnecting info    -> -- reconnecting (info.attempt, info.nextDelayMs)
+            Closed info          -> -- closed {code, reason, wasCleaned}
+            Reconnecting info    -> -- reconnecting {attempt, nextDelayMs, maxRetries}
             Reconnected          -> -- back online
             ReconnectFailed      -> -- gave up
             Error message        -> -- error
@@ -89,6 +90,7 @@ case msg of
 Each `Config` produces its own `WebSocket msg` record. Dispatch events by comparing configs:
 
 ```elm
+chatWs = WS.withPorts chatConfig wsOut
 notifWs = WS.withPorts notifConfig wsOut
 
 subscriptions _ =
@@ -122,7 +124,7 @@ The JS side manages timers. Elm receives `Reconnecting`, `Reconnected`, and `Rec
 
 ## Close codes
 
-RFC 6455 codes are a union type — no magic integers:
+RFC 6455 codes are a union type:
 
 ```elm
 chatWs.closeWith Normal "session ended"
