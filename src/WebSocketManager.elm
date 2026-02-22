@@ -2,7 +2,7 @@ module WebSocketManager exposing
     ( Config, Params, init, initWithParams
     , WebSocket, bind, withBinaryPolling, CommandPort, EventPort
     , onEvent
-    , sendBytes, receiveBytes
+    , sendBytes
     , Event(..), CloseInfo, ReconnectInfo
     , CloseCode(..), closeCodeToInt, closeCodeFromInt
     , ReconnectConfig, defaultReconnect
@@ -22,7 +22,7 @@ module WebSocketManager exposing
 
 # Binary (Bytes)
 
-@docs sendBytes, receiveBytes
+@docs sendBytes
 
 
 # Events
@@ -210,7 +210,7 @@ handling. Use `withBinaryPolling` to wrap your event handler.
 
     echoWs : WS.WebSocket Msg
     echoWs =
-        WS.bind echoConfig wsOut GotWsEvent
+        WS.bind config wsOut GotWsEvent
 
 -}
 bind : Config -> CommandPort msg -> (Result Decode.Error Event -> msg) -> WebSocket msg
@@ -231,7 +231,7 @@ Works with both `bind` users and low-level users — only needs the `Config`
 and the same `toMsg` constructor used for event routing.
 
     GotWsEvent (Ok event) ->
-        WS.withBinaryPolling echoConfig GotWsEvent handleEvent event model
+        WS.withBinaryPolling config GotWsEvent handleEvent event model
 
 -}
 withBinaryPolling :
@@ -662,7 +662,7 @@ bytesResolver response =
 {-| Send binary data through a WebSocket connection. Uses an XHR monkeypatch
 under the hood to pass `Bytes` from Elm to JavaScript without JSON encoding.
 
-    WS.sendBytes echoConfig payload GotBytesSent
+    WS.sendBytes config payload GotBytesSent
 
 -}
 sendBytes : Config -> Bytes -> (Result Http.Error () -> msg) -> Cmd msg
@@ -682,7 +682,7 @@ sendBytes config bytes toMsg =
 from the success branch to keep receiving. A `BadStatus 499` signals that the
 connection was closed.
 
-    WS.receiveBytes echoConfig GotBinaryMessage
+    WS.receiveBytes config toMsg
 
 -}
 receiveBytes : Config -> (Result Http.Error Bytes -> msg) -> Cmd msg
