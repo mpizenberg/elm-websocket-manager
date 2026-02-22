@@ -201,6 +201,48 @@ WS.encode chatConfig (WS.CloseWith (Just WS.Normal) (Just "done")) |> wsOut
 
 See [`example/`](https://github.com/mpizenberg/elm-websocket-manager/tree/main/example) for a runnable echo client with text and binary messaging, connection state UI, and reconnection.
 
+## Comparison with other packages
+
+Compared with [billstclair/elm-websocket-client](https://package.elm-lang.org/packages/billstclair/elm-websocket-client/latest/) and [kageurufu/elm-websockets](https://package.elm-lang.org/packages/kageurufu/elm-websockets/latest/).
+
+### Approach
+
+| | **elm-websocket-manager** | **billstclair/elm-websocket-client** | **kageurufu/elm-websockets** |
+|---|---|---|---|
+| Architecture | Ports + XHR monkeypatch | Ports (via elm-port-funnel) | Ports |
+
+### Core capabilities
+
+| | **elm-websocket-manager** | **billstclair/elm-websocket-client** | **kageurufu/elm-websockets** |
+|---|---|---|---|
+| Text messages | Yes | Yes | Yes |
+| Binary (Bytes) data | Yes (zero-JSON overhead) | No | No |
+| Multiple connections | Yes (URL-based) | Yes (key-based, supports same URL) | Yes (name-based) |
+| Reconnection | Exponential backoff with jitter, configurable maxRetries, delays, skipCodes | Exponential backoff, per-connection on/off | No |
+| Connection state tracking | Yes (Connecting/Connected/Disconnected/Reconnecting/Failed) | Partial (isConnected check) | No |
+| Close codes (RFC 6455) | Full enum with custom codes | Yes (ClosedCode type) | No |
+| Keep-alive | No | Yes | No |
+| Testing simulator | No | Yes | No |
+| Metadata on open | No | No | Yes (Dict String String) |
+
+### Developer experience
+
+| | **elm-websocket-manager** | **billstclair/elm-websocket-client** | **kageurufu/elm-websockets** |
+|---|---|---|---|
+| Exposed modules | 1 | 1 | 4 |
+| Elm dependencies | 5 (core, json, bytes, http, url) | 5 (core, json, port-funnel, decode-pipeline, list-extra) | 2 (core, json) |
+| Setup boilerplate | Low (2 ports, 1 JS init call) | High (copy PortFunnels.elm, load 2 JS files, manage State in Model) | Low (2 ports, 1 JS init call) |
+| API style | `bind` returns a record (`ws.open`, `ws.sendText`, ...) | Factory functions (`makeOpen`, `makeSend`) + manual port send | `withPorts` returns a record (`socket.open`, `socket.send`, ...) |
+| State management | Handled by JS layer | Must store State in Model manually | Handled by JS layer |
+| Event handling | Single `Event` sum type with `onEvent` routing | `Response` sum type processed in update | `EventHandlers` record with per-event callbacks |
+
+### Features we don't implement
+
+- **Keep-alive:** Trivially achieved by ignoring incoming events in the message handler. A dedicated mode would only save a pattern match branch.
+- **Testing simulator:** Can be worked around by testing your pure update logic with hand-crafted `Event` values. Worth considering in a future version.
+- **Metadata on open:** The browser `WebSocket` API does not support custom headers. kageurufu's metadata is stored client-side and echoed back in events but never sent to the server. For auth, pass tokens as URL query parameters or in the first message after connecting.
+- **Multiple connections to same URL:** Uncommon need. If required, append a discriminator query parameter (e.g., `?session=1`) to produce distinct URLs.
+
 ## License
 
 BSD-3-Clause
