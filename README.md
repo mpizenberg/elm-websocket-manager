@@ -162,7 +162,7 @@ WS.encode chatConfig (WS.CloseWith (Just WS.Normal) (Just "done")) |> wsOut
 
 ## Example
 
-See [`example/`](example/) for a runnable echo client with connection state UI and reconnection.
+See [`example/`](https://github.com/mpizenberg/elm-websocket-manager/tree/main/example) for a runnable echo client with connection state UI and reconnection.
 
 ## License
 

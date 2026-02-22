@@ -315,7 +315,7 @@ onEvent port_ pairs fallback =
             port_
                 (\value ->
                     case Decode.decodeValue (Decode.field "id" Decode.string) value of
-                        Err err ->
+                        Err _ ->
                             fallback (Decode.Failure "missing websocket id in message" value)
 
                         Ok id ->
