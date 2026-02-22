@@ -5,6 +5,8 @@ Type-safe WebSocket management for Elm 0.19 with reconnection and binary (Bytes)
 Provides Elm types, encoders, decoders, and a companion JS module. You declare two ports and wire them in; everything else is typed Elm code. Binary data transfers bypass JSON entirely via an XHR monkeypatch, giving zero-cost `Bytes` interop.
 On a recent laptop, a round trip of 100MB witch an "echo" websocket takes about 1 second.
 
+API docs (temporary): https://elm-doc-preview.netlify.app/?repo=mpizenberg/elm-websocket-manager&version=elm-doc-preview
+
 ## Install
 
 **Elm** (not yet published — use as a local package or git dependency):
