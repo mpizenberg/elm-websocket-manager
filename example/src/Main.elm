@@ -32,7 +32,7 @@ echoConfig =
 
 echoWs : WS.WebSocket Msg
 echoWs =
-    WS.bind echoConfig wsOut GotWsEvent NoOp
+    WS.bind echoConfig wsOut GotWsEvent
 
 
 
@@ -75,7 +75,6 @@ init () =
 type Msg
     = GotWsEvent (Result Decode.Error WS.Event)
     | WsDecodeError Decode.Error
-    | NoOp
     | DraftChanged String
     | SendClicked
     | ConnectClicked
@@ -87,7 +86,7 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         GotWsEvent (Ok event) ->
-            WS.withBinaryPolling echoWs handleEvent event model
+            WS.withBinaryPolling echoConfig GotWsEvent handleEvent event model
 
         GotWsEvent (Err err) ->
             ( { model | messages = logStatus ("Event decode error: " ++ Decode.errorToString err) :: model.messages }
@@ -98,9 +97,6 @@ update msg model =
             ( { model | messages = logStatus ("WS decode error: " ++ Decode.errorToString err) :: model.messages }
             , Cmd.none
             )
-
-        NoOp ->
-            ( model, Cmd.none )
 
         DraftChanged text ->
             ( { model | draft = text }, Cmd.none )
@@ -190,6 +186,9 @@ handleEvent event model =
               }
             , Cmd.none
             )
+
+        WS.NoOp ->
+            ( model, Cmd.none )
 
         WS.ReconnectFailed ->
             ( { model

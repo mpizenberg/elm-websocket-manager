@@ -201,58 +201,60 @@ type alias WebSocket msg =
     , sendBytes : Bytes -> Cmd msg
     , close : Cmd msg
     , closeWith : Maybe CloseCode -> Maybe String -> Cmd msg
-    , receiveBinary : Cmd msg
     }
 
 
 {-| Bind a `Config` to a command port, returning a record of command functions.
-The `toMsg` constructor routes binary receive results through your normal event
-handling. The `noOp` msg absorbs fire-and-forget XHR responses (binary sends).
+The `toMsg` constructor routes binary XHR results through your normal event
+handling. Use `withBinaryPolling` to wrap your event handler.
 
     echoWs : WS.WebSocket Msg
     echoWs =
-        WS.bind echoConfig wsOut GotWsEvent NoOp
+        WS.bind echoConfig wsOut GotWsEvent
 
 -}
-bind : Config -> CommandPort msg -> (Result Decode.Error Event -> msg) -> msg -> WebSocket msg
-bind config port_ toMsg noOp =
+bind : Config -> CommandPort msg -> (Result Decode.Error Event -> msg) -> WebSocket msg
+bind config port_ toMsg =
     { open = port_ (encode config Open)
     , sendText = \data -> port_ (encode config (Send data))
-    , sendBytes = \bytes -> sendBytes config bytes (\_ -> noOp)
+    , sendBytes = \bytes -> sendBytes config bytes (\_ -> toMsg (Ok NoOp))
     , close = port_ (encode config (CloseWith Nothing Nothing))
     , closeWith = \code reason -> port_ (encode config (CloseWith code reason))
-    , receiveBinary = receiveBytesInternal config toMsg noOp
     }
 
 
 {-| Wrap your event handler to automatically manage the binary long-poll
 lifecycle. Starts polling on `Opened` and `Reconnected`, re-polls after each
-`BinaryReceived`.
+`BinaryReceived`. Swallows `NoOp` before it reaches your handler.
+
+Works with both `bind` users and low-level users — only needs the `Config`
+and the same `toMsg` constructor used for event routing.
 
     GotWsEvent (Ok event) ->
-        WS.withBinaryPolling echoWs handleEvent event model
+        WS.withBinaryPolling echoConfig GotWsEvent handleEvent event model
 
 -}
 withBinaryPolling :
-    WebSocket msg
+    Config
+    -> (Result Decode.Error Event -> msg)
     -> (Event -> model -> ( model, Cmd msg ))
     -> Event
     -> model
     -> ( model, Cmd msg )
-withBinaryPolling ws handler event model =
+withBinaryPolling config toMsg handler event model =
     let
         ( newModel, cmd ) =
             handler event model
     in
     case event of
         Opened ->
-            ( newModel, Cmd.batch [ cmd, ws.receiveBinary ] )
+            ( newModel, Cmd.batch [ cmd, receiveBytesInternal config toMsg ] )
 
         Reconnected ->
-            ( newModel, Cmd.batch [ cmd, ws.receiveBinary ] )
+            ( newModel, Cmd.batch [ cmd, receiveBytesInternal config toMsg ] )
 
         BinaryReceived _ ->
-            ( newModel, Cmd.batch [ cmd, ws.receiveBinary ] )
+            ( newModel, Cmd.batch [ cmd, receiveBytesInternal config toMsg ] )
 
         _ ->
             ( newModel, cmd )
@@ -263,11 +265,17 @@ withBinaryPolling ws handler event model =
 
 
 {-| Events received from the JS WebSocket manager.
+
+`NoOp` is an internal plumbing event triggered when a fire-and-forget binary
+send completes (success or failure) or when the binary long-poll is terminated
+by a connection close. It carries no information and can be safely ignored.
+
 -}
 type Event
     = Opened
     | MessageReceived String
     | BinaryReceived Bytes
+    | NoOp
     | Closed CloseInfo
     | Error String
     | Reconnecting ReconnectInfo
@@ -691,19 +699,19 @@ receiveBytes config toMsg =
 
 
 {-| Internal: receive binary routed through the Event msg constructor.
-Maps Ok bytes to BinaryReceived, 499 to noOp (channel closed), other errors
-to Error event.
+Maps Ok bytes to BinaryReceived, 499 to NoOp, other errors to Error event.
 -}
-receiveBytesInternal : Config -> (Result Decode.Error Event -> msg) -> msg -> Cmd msg
-receiveBytesInternal config toMsg noOp =
+receiveBytesInternal : Config -> (Result Decode.Error Event -> msg) -> Cmd msg
+receiveBytesInternal config toMsg =
     receiveBytes config
         (\result ->
             case result of
                 Ok bytes ->
                     toMsg (Ok (BinaryReceived bytes))
 
+                -- XHR polling stopped
                 Err (Http.BadStatus 499) ->
-                    noOp
+                    toMsg (Ok NoOp)
 
                 Err err ->
                     toMsg (Ok (Error ("Binary receive error: " ++ httpErrorToString err)))
