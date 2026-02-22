@@ -1,7 +1,7 @@
 module WebSocketManager exposing
     ( Config, Params, init, initWithParams
     , WebSocket, bind, CommandPort, EventPort
-    , WsEvent, onEvent
+    , onEvent
     , Event(..), CloseInfo, ReconnectInfo
     , CloseCode(..), closeCodeToInt, closeCodeFromInt
     , ReconnectConfig, defaultReconnect
@@ -16,7 +16,7 @@ module WebSocketManager exposing
 
 @docs Config, Params, init, initWithParams
 @docs WebSocket, bind, CommandPort, EventPort
-@docs WsEvent, onEvent
+@docs onEvent
 
 
 # Events
@@ -242,29 +242,12 @@ type alias ReconnectInfo =
     }
 
 
-{-| A WebSocket event paired with the `Config` it belongs to.
+{-| Decoder for a WebSocket event. Decodes the `tag` field and corresponding payload.
 -}
-type alias WsEvent =
-    { wsConfig : Config
-    , event : Event
-    }
-
-
-{-| Decoder for events from a specific config. Only succeeds if the event's `id`
-field matches the config's URL.
--}
-eventDecoder : Config -> Decoder Event
-eventDecoder (Config params) =
-    Decode.field "id" Decode.string
-        |> Decode.andThen
-            (\id ->
-                if id == params.url then
-                    Decode.field "tag" Decode.string
-                        |> Decode.andThen eventTagDecoder
-
-                else
-                    Decode.fail ("id mismatch: expected " ++ params.url ++ " but got " ++ id)
-            )
+eventDecoder : Decoder Event
+eventDecoder =
+    Decode.field "tag" Decode.string
+        |> Decode.andThen eventTagDecoder
 
 
 eventTagDecoder : String -> Decoder Event
@@ -305,37 +288,58 @@ eventTagDecoder tag =
             Decode.fail ("unknown event tag: " ++ tag)
 
 
-{-| Subscribe to events from all listed connections through a single event port.
+{-| Subscribe to events from listed connections through a single event port.
+Each config is paired with its own message constructor, so there is no need to
+compare configs when handling events. The fallback handles decode errors and
+events that don't match any declared config.
 
     subscriptions _ =
-        WS.onEvent wsIn [ chatConfig, notifConfig ] GotWsEvent
+        WS.onEvent wsIn
+            [ ( chatConfig, GotChatEvent )
+            , ( notifConfig, GotNotifEvent )
+            ]
+            WsDecodeError
 
 -}
 onEvent :
     EventPort msg
-    -> List Config
-    -> (Result Decode.Error WsEvent -> msg)
+    -> List ( Config, Result Decode.Error Event -> msg )
+    -> (Decode.Error -> msg)
     -> Sub msg
-onEvent port_ configs toMsg =
-    port_
-        (\value ->
-            toMsg (tryConfigs configs value)
-        )
-
-
-tryConfigs : List Config -> Decode.Value -> Result Decode.Error WsEvent
-tryConfigs configs value =
-    case configs of
+onEvent port_ pairs fallback =
+    case pairs of
         [] ->
-            Decode.decodeValue (Decode.fail "no config matched this event") value
+            Sub.none
 
-        config :: rest ->
-            case Decode.decodeValue (eventDecoder config) value of
-                Ok event ->
-                    Ok { wsConfig = config, event = event }
+        _ ->
+            port_
+                (\value ->
+                    case Decode.decodeValue (Decode.field "id" Decode.string) value of
+                        Err err ->
+                            fallback (Decode.Failure "missing websocket id in message" value)
 
-                Err _ ->
-                    tryConfigs rest value
+                        Ok id ->
+                            case matchConfig id pairs of
+                                Nothing ->
+                                    fallback (Decode.Failure ("no registered websocket matched id: " ++ id) value)
+
+                                Just toMsg ->
+                                    toMsg (Decode.decodeValue eventDecoder value)
+                )
+
+
+matchConfig : String -> List ( Config, a ) -> Maybe a
+matchConfig id pairs =
+    case pairs of
+        [] ->
+            Nothing
+
+        ( Config params, value ) :: rest ->
+            if params.url == id then
+                Just value
+
+            else
+                matchConfig id rest
 
 
 

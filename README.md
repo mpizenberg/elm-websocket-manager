@@ -53,21 +53,22 @@ chatWs = WS.bind chatConfig wsOut
 -- Use it
 update msg model =
     case msg of
-        Connect    -> ( model, chatWs.open )
-        Send text  -> ( model, chatWs.send text )
-        Disconnect -> ( model, chatWs.close )
-        GotWsEvent ... -> ...
+        Connect           -> ( model, chatWs.open )
+        Send text         -> ( model, chatWs.send text )
+        Disconnect        -> ( model, chatWs.close )
+        GotChatEvent ...  -> ...
+        WsDecodeError ... -> ...
 
--- Subscribe to events from all connections
+-- Subscribe to events
 subscriptions _ =
-    WS.onEvent wsIn [ chatConfig ] GotWsEvent
+    WS.onEvent wsIn [ ( chatConfig, GotChatEvent ) ] WsDecodeError
 ```
 
 Handle events by pattern matching:
 
 ```elm
 case msg of
-    GotWsEvent (Ok { event }) ->
+    GotChatEvent (Ok event) ->
         case event of
             WS.Opened               -> -- connected
             WS.MessageReceived data -> -- got a message
@@ -77,29 +78,34 @@ case msg of
             WS.ReconnectFailed      -> -- gave up
             WS.Error message        -> -- error
 
-    GotWsEvent (Err _) ->
-        -- decode error
+    GotChatEvent (Err _) ->
+        -- event decode error
+
+    WsDecodeError _ ->
+        -- missing or unmatched websocket id
 ```
 
 ## Multiple connections
 
-Each `Config` produces its own `WebSocket msg` record. Dispatch events by comparing configs:
+Each `Config` produces its own `WebSocket msg` record. Pair each config with a dedicated message constructor:
 
 ```elm
 chatWs = WS.bind chatConfig wsOut
 notifWs = WS.bind notifConfig wsOut
 
 subscriptions _ =
-    WS.onEvent wsIn [ chatConfig, notifConfig ] GotWsEvent
+    WS.onEvent wsIn
+        [ ( chatConfig, GotChatEvent )
+        , ( notifConfig, GotNotifEvent )
+        ]
+        WsDecodeError
 
 -- In update:
-GotWsEvent (Ok { wsConfig, event }) ->
-    if wsConfig == chatConfig then
-        handleChat event model
-    else if wsConfig == notifConfig then
-        handleNotif event model
-    else
-        ( model, Cmd.none )
+GotChatEvent (Ok event) ->
+    handleChat event model
+
+GotNotifEvent (Ok event) ->
+    handleNotif event model
 ```
 
 ## Reconnection

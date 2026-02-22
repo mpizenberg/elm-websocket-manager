@@ -70,7 +70,8 @@ init () =
 
 
 type Msg
-    = GotWsEvent (Result Decode.Error WS.WsEvent)
+    = GotWsEvent (Result Decode.Error WS.Event)
+    | WsDecodeError Decode.Error
     | DraftChanged String
     | SendClicked
     | ConnectClicked
@@ -80,11 +81,16 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        GotWsEvent (Ok { event }) ->
+        GotWsEvent (Ok event) ->
             handleEvent event model
 
         GotWsEvent (Err err) ->
-            ( { model | messages = logStatus ("Decode error: " ++ Decode.errorToString err) :: model.messages }
+            ( { model | messages = logStatus ("Event decode error: " ++ Decode.errorToString err) :: model.messages }
+            , Cmd.none
+            )
+
+        WsDecodeError err ->
+            ( { model | messages = logStatus ("WS decode error: " ++ Decode.errorToString err) :: model.messages }
             , Cmd.none
             )
 
@@ -221,7 +227,7 @@ logStatus text_ =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    WS.onEvent wsIn [ echoConfig ] GotWsEvent
+    WS.onEvent wsIn [ ( echoConfig, GotWsEvent ) ] WsDecodeError
 
 
 
