@@ -55,7 +55,7 @@ import Bytes exposing (Bytes)
 import Http
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode
-import Url
+import XhrBytesBridge
 
 
 
@@ -625,19 +625,14 @@ connectionStateFromEvent event =
 -- BINARY (BYTES)
 
 
-xhrPrefix : String
-xhrPrefix =
-    "https://elm-ws-bytes.localhost/.xhrhook"
-
-
 sendUrl : Config -> String
 sendUrl (Config params) =
-    xhrPrefix ++ "/ws-send/" ++ Url.percentEncode params.url
+    XhrBytesBridge.routeUrl "ws-send" params.url
 
 
 recvUrl : Config -> String
 recvUrl (Config params) =
-    xhrPrefix ++ "/ws-recv/" ++ Url.percentEncode params.url
+    XhrBytesBridge.routeUrl "ws-recv" params.url
 
 
 {-| Send binary data through a WebSocket connection. Uses an XHR monkeypatch

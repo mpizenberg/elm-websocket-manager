@@ -20,5 +20,8 @@
   "devDependencies": {
     "elm-review": "^2.13.5",
     "elm-tooling": "^1.15.1"
+  },
+  "peerDependencies": {
+    "elm-xhr-bytes-bridge": "^1.0.0"
   }
 }
